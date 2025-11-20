@@ -8,6 +8,10 @@ export class AvailabilityStorage {
     this.db = new DatabaseWrapper(dbPath);
   }
 
+  getDatabase(): DatabaseWrapper {
+    return this.db;
+  }
+
   addEntry(entry: AvailabilityEntry): { success: boolean; error?: string } {
     return this.db.addEntry(
       entry.userId,

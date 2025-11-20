@@ -1,5 +1,5 @@
 import { ContextType, Bot } from 'gramio';
-import { parseAvailabilityEntry } from './parser';
+import { parseAvailabilityEntry, AvailabilityEntry } from './parser';
 import { AvailabilityStorage } from './storage';
 import { ExpiryScheduler } from './expiry-scheduler';
 import { airportTimezoneService } from './airport-timezone';
@@ -63,7 +63,7 @@ export class AvailabilityBot {
     // Check cache first
     const cached = this.membershipCache.get(userId);
     const now = Date.now();
-    
+
     if (cached) {
       const cacheValidDuration = cached.isAllowed ? 60 * 60 * 1000 : 5 * 60 * 1000; // 60min positive, 5min negative
       if (now - cached.timestamp < cacheValidDuration) {
@@ -85,7 +85,7 @@ export class AvailabilityBot {
       // Block: kicked, left, restricted
       const allowedStatuses = ['member', 'administrator', 'creator'];
       const isAllowed = allowedStatuses.includes(chatMember.status);
-      
+
       // Cache the result
       this.membershipCache.set(userId, {
         isAllowed,
@@ -99,6 +99,23 @@ export class AvailabilityBot {
         isAllowed: false,
         timestamp: now
       });
+      return false;
+    }
+  }
+
+  private async isGroupAdmin(context: any, userId: number): Promise<boolean> {
+    try {
+      const api = context.bot.api;
+      const chatMember = await api.getChatMember({
+        chat_id: this.targetGroupId,
+        user_id: userId
+      });
+
+      // Only administrators and creators are admins
+      const adminStatuses = ['administrator', 'creator'];
+      return adminStatuses.includes(chatMember.status);
+    } catch (error) {
+      // Fail closed - if we can't verify admin status, deny access
       return false;
     }
   }
@@ -135,6 +152,9 @@ export class AvailabilityBot {
       await this.sendToUser(context, 'Sorry, you must be a member of the OBC group to use this bot.');
       return;
     }
+
+    // Match user to any imported entries with their username
+    this.storage.getDatabase().matchUserToImportedEntries(userId, username);
 
     // Handle single-line commands only
     if (trimmedText === '/add') {
@@ -182,6 +202,11 @@ export class AvailabilityBot {
       return;
     }
 
+    if (trimmedText.startsWith('/import')) {
+      await this.handleImportCommand(context, trimmedText);
+      return;
+    }
+
     // If we reach here, it's not a recognized command - silently ignore
   }
 
@@ -194,6 +219,29 @@ export class AvailabilityBot {
   private async sendToUser(context: any, message: string): Promise<void> {
     // Commands are now only accepted via private messages, so always use send()
     await context.send(message);
+  }
+
+  async sendAdminHelpIfAdmin(context: any): Promise<void> {
+    const userId = context.from?.id;
+    if (!userId) return;
+
+    const isAdmin = await this.isGroupAdmin(context, userId);
+    if (!isAdmin) return;
+
+    const adminHelp = `🔧 *Admin Commands:*
+
+• Import entries: \`/import\`
+  Format: \`MMDD DEP / ARR @username\`
+  Example:
+  \`\`\`
+/import
+1122 HOT / DOG @Alice
+1123 HEL / YES @Bob
+\`\`\`
+
+More admin commands will be added\\.`;
+
+    await context.send(adminHelp, { parse_mode: 'MarkdownV2' });
   }
 
   private formatParseError(entryText: string, parseResult: any, commandPrefix = ''): string {
@@ -243,14 +291,14 @@ export class AvailabilityBot {
 
   async handleClearCommand(context: any): Promise<void> {
     const userId = context.from.id;
-    
+
     // Get the user's entries before clearing them
     const entriesToClear = this.storage.getUserEntries(userId);
-    
+
     if (entriesToClear.length > 0) {
       // Clear the entries
       this.storage.clearUserEntries(userId);
-      
+
       // Show what was cleared
       const clearedEntries = entriesToClear
         .sort((a, b) => {
@@ -261,12 +309,120 @@ export class AvailabilityBot {
         })
         .map(entry => `${this.convertFullDateToMMDD(entry.date)} ${entry.departure} / ${entry.arrival}`)
         .join('\n');
-      
+
       await this.sendToUser(context, `Cleared entries:\n${clearedEntries}\n\nYour entries: none`);
       await this.postUpdatedListToGroup(context);
     } else {
       await this.sendToUser(context, 'No entries to clear.');
     }
+  }
+
+  async handleImportCommand(context: any, commandText: string): Promise<void> {
+    const userId = context.from.id;
+
+    // Check if user is admin
+    const isAdmin = await this.isGroupAdmin(context, userId);
+    if (!isAdmin) {
+      await this.sendToUser(context, 'This command is only available to group administrators.');
+      return;
+    }
+
+    // Extract lines after "/import"
+    const importText = commandText.substring(7).trim();
+    if (!importText) {
+      await this.sendToUser(context, 'Usage: /import\n1122 HOT / DOG @Alice\n1123 HEL / YES @Bob');
+      return;
+    }
+
+    const lines = importText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    const results: { success: boolean; line: string; error?: string }[] = [];
+
+    for (const line of lines) {
+      const parsed = this.parseImportLine(line);
+      if (parsed.success && parsed.entry) {
+        const addResult = this.storage.addEntry(parsed.entry);
+        if (addResult.success) {
+          results.push({ success: true, line });
+        } else {
+          results.push({ success: false, line, error: addResult.error || 'Unknown error' });
+        }
+      } else {
+        results.push({ success: false, line, error: parsed.error || 'Invalid format' });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failedResults = results.filter(r => !r.success);
+
+    let response = `Imported ${successCount} entries.`;
+    if (failedResults.length > 0) {
+      response += `\n\nFailed to import ${failedResults.length} entries:`;
+      for (const failed of failedResults) {
+        response += `\n- ${failed.line} (${failed.error})`;
+      }
+    }
+
+    await this.sendToUser(context, response);
+    if (successCount > 0) {
+      await this.postUpdatedListToGroup(context);
+    }
+  }
+
+  private parseImportLine(line: string): { success: boolean; entry?: AvailabilityEntry; error?: string } {
+    // Parse format: MMDD DEP / ARR @username
+    // Example: 1122 HOT / DOG @Alice
+    const pattern = /^(\d{4})\s+([A-Z]{3})\s*\/\s*([A-Z]{3})\s+@(\w+)$/;
+    const match = line.match(pattern);
+
+    if (!match) {
+      return { success: false, error: 'Invalid format' };
+    }
+
+    const [, mmdd, departure, arrival, username] = match;
+
+    if (!mmdd || !departure || !arrival || !username) {
+      return { success: false, error: 'Invalid format' };
+    }
+
+    // Parse date
+    const month = mmdd.substring(0, 2);
+    const day = mmdd.substring(2, 4);
+
+    // Validate month and day
+    const monthNum = parseInt(month, 10);
+    const dayNum = parseInt(day, 10);
+
+    if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
+      return { success: false, error: 'Invalid date' };
+    }
+
+    // Determine year (same logic as parser.ts)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    let year = currentYear;
+    if (monthNum < currentMonth || (monthNum === currentMonth && dayNum < now.getDate())) {
+      year = currentYear + 1;
+    }
+
+    const fullDate = `${year}-${month}-${day}`;
+
+    // Calculate expiry timestamp (use departure airport timezone)
+    const expiryTimestamp = airportTimezoneService.getMidnightTimestamp(departure, mmdd, year);
+
+    return {
+      success: true,
+      entry: {
+        userId: null,
+        username,
+        date: fullDate,
+        departure,
+        arrival,
+        originalText: line,
+        expiryTimestamp
+      }
+    };
   }
 
   private convertFullDateToMMDD(fullDate: string): string {

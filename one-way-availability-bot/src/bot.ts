@@ -54,8 +54,11 @@ export function createBotHandlers(groupId?: number, topicId?: number): BotHandle
   const availabilityBot = new AvailabilityBot(undefined, groupId, topicId);
 
   const sendHelpMessage = async (context: any) => {
-    // Commands are now only accepted via private messages, so always use send()
+    // Send regular help message
     await context.send(getHelpText(), { parse_mode: 'MarkdownV2' });
+
+    // Check if user is admin and send admin help
+    await availabilityBot.sendAdminHelpIfAdmin(context);
   };
 
   return {

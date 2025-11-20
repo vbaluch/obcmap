@@ -25,7 +25,7 @@ export class DatabaseWrapper {
     const createTableSQL = `
       CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         username TEXT NOT NULL,
         date TEXT NOT NULL,
         departure TEXT NOT NULL,
@@ -41,7 +41,7 @@ export class DatabaseWrapper {
     const createUniqueIndexSQL = `
       CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_unique_active
       ON entries(user_id, date, departure, arrival)
-      WHERE deleted_at IS NULL
+      WHERE deleted_at IS NULL AND user_id IS NOT NULL
     `;
 
     const createLastMessageTableSQL = `
@@ -58,14 +58,16 @@ export class DatabaseWrapper {
   }
 
 
-  addEntry(userId: number, username: string, date: string, departure: string, arrival: string, originalText: string, expiryTimestamp: number): { success: boolean; error?: string } {
+  addEntry(userId: number | null, username: string, date: string, departure: string, arrival: string, originalText: string, expiryTimestamp: number): { success: boolean; error?: string } {
     try {
-      // First check if user already has 3 active entries (exclude deleted)
-      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM entries WHERE user_id = ? AND deleted_at IS NULL');
-      const result = countStmt.get(userId) as { count: number };
+      // Only check 3-entry limit if user_id is provided (not for imports)
+      if (userId !== null) {
+        const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM entries WHERE user_id = ? AND deleted_at IS NULL');
+        const result = countStmt.get(userId) as { count: number };
 
-      if (result.count >= 3) {
-        return { success: false, error: `Maximum 3 entries per user allowed: "${originalText}"` };
+        if (result.count >= 3) {
+          return { success: false, error: `Maximum 3 entries per user allowed: "${originalText}"` };
+        }
       }
 
       // Try to insert the entry
@@ -150,6 +152,17 @@ export class DatabaseWrapper {
       stmt.run(chatId);
     } catch (err) {
       // Ignore errors
+    }
+  }
+
+  matchUserToImportedEntries(userId: number, username: string): number {
+    try {
+      // Find imported entries with matching username (case-insensitive) and NULL user_id
+      const stmt = this.db.prepare('UPDATE entries SET user_id = ? WHERE user_id IS NULL AND LOWER(username) = LOWER(?) AND deleted_at IS NULL');
+      const result = stmt.run(userId, username);
+      return result.changes;
+    } catch (err) {
+      return 0;
     }
   }
 

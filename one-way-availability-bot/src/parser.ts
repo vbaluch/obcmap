@@ -1,7 +1,7 @@
 import { airportTimezoneService } from './airport-timezone';
 
 export interface AvailabilityEntry {
-  userId: number;
+  userId: number | null;
   username: string;
   date: string; // YYYY-MM-DD format
   departure: string; // 3-letter airport code
