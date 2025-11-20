@@ -1,0 +1,6 @@
+.env
+*.db
+coverage/
+dist/
+node_modules/
+ourairports-data/
