@@ -44,7 +44,7 @@ export class AvailabilityStorage {
     for (const entry of allEntries) {
       const isExpired = now >= entry.expiry_timestamp;
 
-      if (isExpired) {
+      if (isExpired && entry.user_id !== null) {
         const removed = this.db.removeEntry(entry.user_id, entry.date, entry.departure, entry.arrival, 'expired');
         if (removed) {
           removedCount++;

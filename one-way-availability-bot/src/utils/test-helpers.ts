@@ -19,6 +19,35 @@ export interface MockMessage {
   forum_topic_id?: number;
 }
 
+export interface SendMessageParams {
+  chat_id: number;
+  text: string;
+  message_thread_id?: number;
+  parse_mode?: 'MarkdownV2' | 'HTML' | 'Markdown';
+}
+
+export interface DeleteMessageParams {
+  chat_id: number;
+  message_id: number;
+}
+
+export interface GetChatMemberParams {
+  chat_id: number;
+  user_id: number;
+}
+
+export interface ChatMemberResponse {
+  status: 'member' | 'administrator' | 'creator' | 'left' | 'kicked' | 'restricted';
+}
+
+export interface SendOptions {
+  parse_mode?: 'MarkdownV2' | 'HTML' | 'Markdown';
+}
+
+export interface MessageResponse {
+  message_id?: number;
+}
+
 export interface MockContext {
   message: MockMessage;
   from: MockUser;
@@ -27,13 +56,13 @@ export interface MockContext {
   payload?: {
     message_thread_id?: number;
   };
-  send: jest.MockedFunction<(text: string, options?: any) => Promise<any>>;
-  reply: jest.MockedFunction<(text: string, options?: any) => Promise<any>>;
+  send: jest.MockedFunction<(text: string, options?: SendOptions) => Promise<MessageResponse>>;
+  reply: jest.MockedFunction<(text: string, options?: SendOptions) => Promise<MessageResponse>>;
   bot: {
     api: {
-      sendMessage: jest.MockedFunction<(params: any) => Promise<any>>;
-      deleteMessage: jest.MockedFunction<(params: any) => Promise<any>>;
-      getChatMember: jest.MockedFunction<(params: any) => Promise<any>>;
+      sendMessage: jest.MockedFunction<(params: SendMessageParams) => Promise<MessageResponse>>;
+      deleteMessage: jest.MockedFunction<(params: DeleteMessageParams) => Promise<Record<string, never>>>;
+      getChatMember: jest.MockedFunction<(params: GetChatMemberParams) => Promise<ChatMemberResponse>>;
     };
   };
 }

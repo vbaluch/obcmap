@@ -1,9 +1,9 @@
-import { ContextType, Bot } from 'gramio';
-import { parseAvailabilityEntry, AvailabilityEntry } from './parser';
+import { parseAvailabilityEntry, AvailabilityEntry, ParseResult } from './parser';
 import { AvailabilityStorage } from './storage';
 import { ExpiryScheduler } from './expiry-scheduler';
 import { airportTimezoneService } from './airport-timezone';
 import { getExampleDate } from './utils/date-helpers';
+import { BotContext } from './types';
 
 interface MembershipCacheEntry {
   isAllowed: boolean;
@@ -14,8 +14,8 @@ export interface BotAPI {
   sendMessage: (params: {
     chat_id: number;
     text: string;
-    message_thread_id?: number | undefined;
-    parse_mode?: "MarkdownV2" | "HTML" | "Markdown" | undefined;
+    message_thread_id?: number;
+    parse_mode?: "MarkdownV2" | "HTML" | "Markdown";
   }) => Promise<{ message_id?: number }>;
   deleteMessage: (params: {
     chat_id: number;
@@ -59,7 +59,7 @@ export class AvailabilityBot {
     );
   }
 
-  private async isGroupMember(context: any, userId: number): Promise<boolean> {
+  private async isGroupMember(context: BotContext, userId: number): Promise<boolean> {
     // Check cache first
     const cached = this.membershipCache.get(userId);
     const now = Date.now();
@@ -103,7 +103,7 @@ export class AvailabilityBot {
     }
   }
 
-  private async isGroupAdmin(context: any, userId: number): Promise<boolean> {
+  private async isGroupAdmin(context: BotContext, userId: number): Promise<boolean> {
     try {
       const api = context.bot.api;
       const chatMember = await api.getChatMember({
@@ -120,7 +120,7 @@ export class AvailabilityBot {
     }
   }
 
-  async handleMessage(context: ContextType<Bot, "message"> | any): Promise<void> {
+  async handleMessage(context: BotContext): Promise<void> {
     
     const text = context.text;
     if (!text || typeof text !== 'string') {
@@ -216,12 +216,12 @@ export class AvailabilityBot {
     return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
   }
 
-  private async sendToUser(context: any, message: string): Promise<void> {
+  private async sendToUser(context: BotContext, message: string): Promise<void> {
     // Commands are now only accepted via private messages, so always use send()
     await context.send(message);
   }
 
-  async sendAdminHelpIfAdmin(context: any): Promise<void> {
+  async sendAdminHelpIfAdmin(context: BotContext): Promise<void> {
     const userId = context.from?.id;
     if (!userId) return;
 
@@ -244,7 +244,7 @@ More admin commands will be added\\.`;
     await context.send(adminHelp, { parse_mode: 'MarkdownV2' });
   }
 
-  private formatParseError(entryText: string, parseResult: any, commandPrefix = ''): string {
+  private formatParseError(entryText: string, parseResult: ParseResult, commandPrefix = ''): string {
     const quotedInput = commandPrefix ? `"${commandPrefix}"` : `"${entryText}"`;
     const exampleDate = getExampleDate();
     if (parseResult.error === 'format') {
@@ -255,9 +255,15 @@ More admin commands will be added\\.`;
     return `Unknown error parsing ${quotedInput}`;
   }
 
-  async handleAddCommand(context: any, commandText: string): Promise<void> {
+  async handleAddCommand(context: BotContext, commandText: string): Promise<void> {
     const userId = context.from.id;
     const username = context.from.username;
+
+    // Username is required for adding entries
+    if (!username) {
+      await this.sendToUser(context, 'Sorry, you need a Telegram username (@username) to use this bot.');
+      return;
+    }
 
     // Extract entry text after "/add "
     const entryText = commandText.substring(5).trim();
@@ -289,7 +295,7 @@ More admin commands will be added\\.`;
     }
   }
 
-  async handleClearCommand(context: any): Promise<void> {
+  async handleClearCommand(context: BotContext): Promise<void> {
     const userId = context.from.id;
 
     // Get the user's entries before clearing them
@@ -317,7 +323,7 @@ More admin commands will be added\\.`;
     }
   }
 
-  async handleImportCommand(context: any, commandText: string): Promise<void> {
+  async handleImportCommand(context: BotContext, commandText: string): Promise<void> {
     const userId = context.from.id;
 
     // Check if user is admin
@@ -555,19 +561,19 @@ More admin commands will be added\\.`;
     }
   }
 
-  async handleRemoveCommand(context: ContextType<Bot, "message"> | any, text: string): Promise<void> {
+  async handleRemoveCommand(context: BotContext, text: string): Promise<void> {
     const userId = context.from.id;
     const result = await this.processRemoveCommand(text, userId);
-    
+
     if (result.success) {
       // First reply to user with their current entries
       await this.replyWithUserEntries(context);
-      
+
       // Then post updated full list to group (last message)
       await this.postUpdatedListToGroup(context);
     } else {
       // Add quotes around the original command for clarity
-      const originalText = context.text.trim();
+      const originalText = text.trim();
       const errorMessage = `"${originalText}": ${result.error || 'Unknown error'}`;
       
       // For "Multiple entries found" errors, show user entries like other errors
@@ -579,7 +585,7 @@ More admin commands will be added\\.`;
     }
   }
 
-  async replyWithUserEntries(context: ContextType<Bot, "message"> | any): Promise<void> {
+  async replyWithUserEntries(context: BotContext): Promise<void> {
     const userId = context.from.id;
     const userEntries = this.storage.getUserEntries(userId);
     
@@ -600,7 +606,7 @@ More admin commands will be added\\.`;
     }
   }
 
-  async sendErrorWithUserEntries(context: ContextType<Bot, "message"> | any, errorMessage: string): Promise<void> {
+  async sendErrorWithUserEntries(context: BotContext, errorMessage: string): Promise<void> {
     const userId = context.from.id;
     const userEntries = this.storage.getUserEntries(userId);
     
@@ -622,7 +628,7 @@ More admin commands will be added\\.`;
   }
 
 
-  async postUpdatedListToGroup(context: ContextType<Bot, "message"> | any): Promise<void> {
+  async postUpdatedListToGroup(context: BotContext): Promise<void> {
     const api = context.bot.api;
 
     // Delete previous bot message if it exists
@@ -658,7 +664,7 @@ More admin commands will be added\\.`;
     }
   }
 
-  async postUpdatedList(context: ContextType<Bot, "message"> | any): Promise<void> {
+  async postUpdatedList(context: BotContext): Promise<void> {
     // Legacy method for backward compatibility
     await this.postUpdatedListToGroup(context);
   }

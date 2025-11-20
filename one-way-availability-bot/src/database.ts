@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
+import { EntryRow, SQLiteError } from './types';
 
 export class DatabaseWrapper {
   private db: Database.Database;
@@ -75,8 +76,9 @@ export class DatabaseWrapper {
       insertStmt.run(userId, username, date, departure, arrival, originalText, expiryTimestamp);
 
       return { success: true };
-    } catch (err: any) {
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    } catch (err) {
+      const sqliteError = err as SQLiteError;
+      if (sqliteError.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return { success: false, error: `Entry already exists: "${originalText}"` };
       } else {
         return { success: false, error: 'Database error' };
@@ -104,19 +106,19 @@ export class DatabaseWrapper {
     }
   }
 
-  getAllEntries(): any[] {
+  getAllEntries(): EntryRow[] {
     try {
       const stmt = this.db.prepare('SELECT * FROM entries WHERE deleted_at IS NULL ORDER BY date, departure');
-      return stmt.all();
+      return stmt.all() as EntryRow[];
     } catch (err) {
       return [];
     }
   }
 
-  getUserEntries(userId: number): any[] {
+  getUserEntries(userId: number): EntryRow[] {
     try {
       const stmt = this.db.prepare('SELECT * FROM entries WHERE user_id = ? AND deleted_at IS NULL ORDER BY date, departure');
-      return stmt.all(userId);
+      return stmt.all(userId) as EntryRow[];
     } catch (err) {
       return [];
     }

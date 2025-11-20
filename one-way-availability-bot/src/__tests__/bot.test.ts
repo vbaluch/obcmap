@@ -1,6 +1,7 @@
 import { createBotHandlers } from '../bot';
 import { AvailabilityBot } from '../availability-bot';
 import { createMockContext, createMockUsers } from '../utils/test-helpers';
+import { BotContext } from '../types';
 
 describe('Bot Handlers', () => {
   let handlers: ReturnType<typeof createBotHandlers>;
@@ -16,24 +17,19 @@ describe('Bot Handlers', () => {
     bot.getStorage().clearAllData();
     
     // Create handlers that use our test bot instance
-    const mockHelpHandler = async (context: any) => {
-      const isPrivateMessage = context.chat.type === 'private';
+    const mockHelpHandler = async (context: BotContext): Promise<void> => {
       const message = "Hello! I'm your OBC One-Way Availability bot. Send me your availability in format: MMDD DEP ARR (e.g., 1115 ber ist)";
-      if (isPrivateMessage) {
-        return context.send(message);
-      } else {
-        return context.reply(message);
-      }
+      await context.send(message);
     };
     
     handlers = {
       onStart: mockHelpHandler,
       onHelp: mockHelpHandler,
       onAdd: async (context) => {
-        await bot.handleAddCommand(context, context.text);
+        await bot.handleAddCommand(context, context.text || '');
       },
       onRemove: async (context) => {
-        await bot.handleRemoveCommand(context, context.text);
+        await bot.handleRemoveCommand(context, context.text || '');
       },
       onMessage: async (context) => {
         await bot.handleMessage(context);

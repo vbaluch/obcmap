@@ -2,13 +2,14 @@ import { Bot } from "gramio";
 import { AvailabilityBot, BotAPI } from "./availability-bot";
 import { airportTimezoneService } from "./airport-timezone";
 import { getExampleDate } from "./utils/date-helpers";
+import { BotContext } from "./types";
 
 export interface BotHandlers {
-  onStart: (context: any) => Promise<void>;
-  onHelp: (context: any) => Promise<void>;
-  onAdd: (context: any) => Promise<void>;
-  onRemove: (context: any) => Promise<void>;
-  onMessage: (context: any) => Promise<void>;
+  onStart: (context: BotContext) => Promise<void>;
+  onHelp: (context: BotContext) => Promise<void>;
+  onAdd: (context: BotContext) => Promise<void>;
+  onRemove: (context: BotContext) => Promise<void>;
+  onMessage: (context: BotContext) => Promise<void>;
   // For testing
   getBot?: () => AvailabilityBot;
 }
@@ -53,7 +54,7 @@ function getHelpText(): string {
 export function createBotHandlers(groupId?: number, topicId?: number): BotHandlers {
   const availabilityBot = new AvailabilityBot(undefined, groupId, topicId);
 
-  const sendHelpMessage = async (context: any) => {
+  const sendHelpMessage = async (context: BotContext) => {
     // Send regular help message
     await context.send(getHelpText(), { parse_mode: 'MarkdownV2' });
 
