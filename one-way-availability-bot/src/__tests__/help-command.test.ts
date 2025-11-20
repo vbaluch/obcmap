@@ -116,4 +116,105 @@ describe('Help Command', () => {
       expect(handlers.onStart).toBe(handlers.onHelp);
     });
   });
+
+  describe('Admin Help Message', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-11-13T10:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should send admin help message to administrators', async () => {
+      const users = createMockUsers();
+      const privateChat = { id: users.alice.id, type: 'private' as const };
+      const context = createMockContext('/help', users.alice, privateChat);
+
+      // Mock alice as administrator
+      context.bot.api.getChatMember.mockResolvedValue({ status: 'administrator' });
+
+      await handlers.onHelp(context);
+
+      // Should send both regular help and admin help
+      expect(context.send).toHaveBeenCalledTimes(2);
+
+      // First call: regular help
+      expect(context.send).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining("Hello\\! I'm your OBC One\\-Way Availability Bot"),
+        { parse_mode: 'MarkdownV2' }
+      );
+
+      // Second call: admin help
+      expect(context.send).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('🔧 *Admin Commands:*'),
+        { parse_mode: 'MarkdownV2' }
+      );
+
+      // Admin help should contain import command documentation
+      const adminHelpText = context.send.mock.calls[1]?.[0];
+      expect(adminHelpText).toContain('/import');
+      expect(adminHelpText).toContain('MMDD DEP / ARR @username');
+      expect(adminHelpText).toContain('1122 HOT / DOG @Alice');
+      expect(adminHelpText).toContain('1123 HEL / YES @Bob');
+    });
+
+    it('should send admin help to creators', async () => {
+      const users = createMockUsers();
+      const privateChat = { id: users.alice.id, type: 'private' as const };
+      const context = createMockContext('/help', users.alice, privateChat);
+
+      // Mock alice as creator
+      context.bot.api.getChatMember.mockResolvedValue({ status: 'creator' });
+
+      await handlers.onHelp(context);
+
+      // Should send both regular help and admin help
+      expect(context.send).toHaveBeenCalledTimes(2);
+      expect(context.send).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('🔧 *Admin Commands:*'),
+        { parse_mode: 'MarkdownV2' }
+      );
+    });
+
+    it('should not send admin help to regular members', async () => {
+      const users = createMockUsers();
+      const privateChat = { id: users.alice.id, type: 'private' as const };
+      const context = createMockContext('/help', users.alice, privateChat);
+
+      // Mock alice as regular member
+      context.bot.api.getChatMember.mockResolvedValue({ status: 'member' });
+
+      await handlers.onHelp(context);
+
+      // Should only send regular help (1 message)
+      expect(context.send).toHaveBeenCalledTimes(1);
+      expect(context.send).toHaveBeenCalledWith(
+        expect.stringContaining("Hello\\! I'm your OBC One\\-Way Availability Bot"),
+        { parse_mode: 'MarkdownV2' }
+      );
+    });
+
+    it('should handle getChatMember errors gracefully', async () => {
+      const users = createMockUsers();
+      const privateChat = { id: users.alice.id, type: 'private' as const };
+      const context = createMockContext('/help', users.alice, privateChat);
+
+      // Mock getChatMember to throw error (e.g., network issue)
+      context.bot.api.getChatMember.mockRejectedValue(new Error('Network error'));
+
+      await handlers.onHelp(context);
+
+      // Should still send regular help (and not crash)
+      expect(context.send).toHaveBeenCalledTimes(1);
+      expect(context.send).toHaveBeenCalledWith(
+        expect.stringContaining("Hello\\! I'm your OBC One\\-Way Availability Bot"),
+        { parse_mode: 'MarkdownV2' }
+      );
+    });
+  });
 });
