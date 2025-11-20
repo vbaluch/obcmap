@@ -25,35 +25,43 @@ export class DatabaseWrapper {
     const createTableSQL = `
       CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id BIGINT NOT NULL,
+        user_id INTEGER NOT NULL,
         username TEXT NOT NULL,
         date TEXT NOT NULL,
         departure TEXT NOT NULL,
         arrival TEXT NOT NULL,
         original_text TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expiry_timestamp BIGINT NOT NULL,
-        UNIQUE(user_id, date, departure, arrival)
+        expiry_timestamp INTEGER NOT NULL,
+        deleted_at DATETIME DEFAULT NULL,
+        deletion_reason TEXT DEFAULT NULL
       )
+    `;
+
+    const createUniqueIndexSQL = `
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_unique_active
+      ON entries(user_id, date, departure, arrival)
+      WHERE deleted_at IS NULL
     `;
 
     const createLastMessageTableSQL = `
       CREATE TABLE IF NOT EXISTS last_messages (
-        chat_id BIGINT PRIMARY KEY,
-        message_id BIGINT NOT NULL,
+        chat_id INTEGER PRIMARY KEY,
+        message_id INTEGER NOT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `;
 
     this.db.exec(createTableSQL);
+    this.db.exec(createUniqueIndexSQL);
     this.db.exec(createLastMessageTableSQL);
   }
 
 
   addEntry(userId: number, username: string, date: string, departure: string, arrival: string, originalText: string, expiryTimestamp: number): { success: boolean; error?: string } {
     try {
-      // First check if user already has 3 entries
-      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM entries WHERE user_id = ?');
+      // First check if user already has 3 active entries (exclude deleted)
+      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM entries WHERE user_id = ? AND deleted_at IS NULL');
       const result = countStmt.get(userId) as { count: number };
 
       if (result.count >= 3) {
@@ -74,10 +82,10 @@ export class DatabaseWrapper {
     }
   }
 
-  removeEntry(userId: number, date: string, departure: string, arrival: string): boolean {
+  removeEntry(userId: number, date: string, departure: string, arrival: string, deletionReason: string = 'manual'): boolean {
     try {
-      const stmt = this.db.prepare('DELETE FROM entries WHERE user_id = ? AND date = ? AND departure = ? AND arrival = ?');
-      const result = stmt.run(userId, date, departure, arrival);
+      const stmt = this.db.prepare('UPDATE entries SET deleted_at = CURRENT_TIMESTAMP, deletion_reason = ? WHERE user_id = ? AND date = ? AND departure = ? AND arrival = ? AND deleted_at IS NULL');
+      const result = stmt.run(deletionReason, userId, date, departure, arrival);
       return result.changes > 0;
     } catch (err) {
       return false;
@@ -86,8 +94,8 @@ export class DatabaseWrapper {
 
   clearUserEntries(userId: number): number {
     try {
-      const stmt = this.db.prepare('DELETE FROM entries WHERE user_id = ?');
-      const result = stmt.run(userId);
+      const stmt = this.db.prepare('UPDATE entries SET deleted_at = CURRENT_TIMESTAMP, deletion_reason = ? WHERE user_id = ? AND deleted_at IS NULL');
+      const result = stmt.run('manual', userId);
       return result.changes;
     } catch (err) {
       return 0;
@@ -96,7 +104,7 @@ export class DatabaseWrapper {
 
   getAllEntries(): any[] {
     try {
-      const stmt = this.db.prepare('SELECT * FROM entries ORDER BY date, departure');
+      const stmt = this.db.prepare('SELECT * FROM entries WHERE deleted_at IS NULL ORDER BY date, departure');
       return stmt.all();
     } catch (err) {
       return [];
@@ -105,7 +113,7 @@ export class DatabaseWrapper {
 
   getUserEntries(userId: number): any[] {
     try {
-      const stmt = this.db.prepare('SELECT * FROM entries WHERE user_id = ? ORDER BY date, departure');
+      const stmt = this.db.prepare('SELECT * FROM entries WHERE user_id = ? AND deleted_at IS NULL ORDER BY date, departure');
       return stmt.all(userId);
     } catch (err) {
       return [];

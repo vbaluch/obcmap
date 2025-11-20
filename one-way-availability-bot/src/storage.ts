@@ -30,7 +30,7 @@ export class AvailabilityStorage {
 
   /**
    * Remove entries that have expired based on stored expiry timestamp
-   * Returns the number of entries removed
+   * Returns the number of entries soft-deleted
    */
   cleanupExpiredEntries(): number {
     const allEntries = this.db.getAllEntries();
@@ -39,9 +39,9 @@ export class AvailabilityStorage {
 
     for (const entry of allEntries) {
       const isExpired = now >= entry.expiry_timestamp;
-      
+
       if (isExpired) {
-        const removed = this.db.removeEntry(entry.user_id, entry.date, entry.departure, entry.arrival);
+        const removed = this.db.removeEntry(entry.user_id, entry.date, entry.departure, entry.arrival, 'expired');
         if (removed) {
           removedCount++;
         }
