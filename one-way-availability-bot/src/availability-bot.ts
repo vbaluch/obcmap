@@ -3,6 +3,7 @@ import { parseAvailabilityEntry } from './parser';
 import { AvailabilityStorage } from './storage';
 import { ExpiryScheduler } from './expiry-scheduler';
 import { airportTimezoneService } from './airport-timezone';
+import { getExampleDate } from './utils/date-helpers';
 
 interface MembershipCacheEntry {
   isAllowed: boolean;
@@ -137,7 +138,8 @@ export class AvailabilityBot {
 
     // Handle single-line commands only
     if (trimmedText === '/add') {
-      await this.sendToUser(context, 'Usage: /add MMDD DEP ARR\nExample: /add 1115 BER IST');
+      const exampleDate = getExampleDate();
+      await this.sendToUser(context, `Usage: /add MMDD DEP ARR\nExample: /add ${exampleDate} BER IST`);
       return;
     }
 
@@ -147,7 +149,8 @@ export class AvailabilityBot {
     }
 
     if (trimmedText === '/remove') {
-      await this.sendToUser(context, 'Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove 1115 BER IST or /remove 1115 (if only one entry for that date)');
+      const exampleDate = getExampleDate();
+      await this.sendToUser(context, `Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove ${exampleDate} BER IST or /remove ${exampleDate} (if only one entry for that date)`);
       return;
     }
 
@@ -157,7 +160,8 @@ export class AvailabilityBot {
     }
 
     if (trimmedText === '/rm') {
-      await this.sendToUser(context, 'Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove 1115 BER IST or /remove 1115 (if only one entry for that date)');
+      const exampleDate = getExampleDate();
+      await this.sendToUser(context, `Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove ${exampleDate} BER IST or /remove ${exampleDate} (if only one entry for that date)`);
       return;
     }
 
@@ -194,8 +198,9 @@ export class AvailabilityBot {
 
   private formatParseError(entryText: string, parseResult: any, commandPrefix = ''): string {
     const quotedInput = commandPrefix ? `"${commandPrefix}"` : `"${entryText}"`;
+    const exampleDate = getExampleDate();
     if (parseResult.error === 'format') {
-      return `Invalid format: ${quotedInput}. Use format: MMDD DEP ARR (e.g., 1115 BER IST)`;
+      return `Invalid format: ${quotedInput}. Use format: MMDD DEP ARR (e.g., ${exampleDate} BER IST)`;
     } else if (parseResult.error === 'date_limit') {
       return `Date too far in advance: ${quotedInput}. Entries are only allowed up to 7 days from today.`;
     }
@@ -205,11 +210,12 @@ export class AvailabilityBot {
   async handleAddCommand(context: any, commandText: string): Promise<void> {
     const userId = context.from.id;
     const username = context.from.username;
-    
+
     // Extract entry text after "/add "
     const entryText = commandText.substring(5).trim();
     if (!entryText) {
-      await this.sendToUser(context, 'Usage: /add 1115 BER IST');
+      const exampleDate = getExampleDate();
+      await this.sendToUser(context, `Usage: /add ${exampleDate} BER IST`);
       return;
     }
 
@@ -327,21 +333,22 @@ export class AvailabilityBot {
 
   async processRemoveCommand(removeCommand: string, userId: number): Promise<{ success: boolean; error?: string }> {
     const args = removeCommand.slice(7).trim(); // Remove '/remove'
-    
+    const exampleDate = getExampleDate();
+
     if (!args) {
       // No arguments provided
       return {
         success: false,
-        error: 'Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove 1115 BER IST or /remove 1115 (if only one entry for that date)'
+        error: `Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove ${exampleDate} BER IST or /remove ${exampleDate} (if only one entry for that date)`
       };
     }
-    
+
     const parsed = this.parseRemoveCommand(args);
-    
+
     if (parsed.error) {
       return {
         success: false,
-        error: 'Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove 1115 BER IST or /remove 1115 (if only one entry for that date)'
+        error: `Usage: /remove (or /rm) MMDD DEP ARR or /remove MMDD\nExample: /remove ${exampleDate} BER IST or /remove ${exampleDate} (if only one entry for that date)`
       };
     }
 

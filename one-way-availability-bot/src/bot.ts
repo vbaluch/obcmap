@@ -1,6 +1,7 @@
 import { Bot } from "gramio";
 import { AvailabilityBot, BotAPI } from "./availability-bot";
 import { airportTimezoneService } from "./airport-timezone";
+import { getExampleDate } from "./utils/date-helpers";
 
 export interface BotHandlers {
   onStart: (context: any) => Promise<void>;
@@ -13,11 +14,8 @@ export interface BotHandlers {
 }
 
 function getHelpText(): string {
-  // Generate dynamic example date (two days from now)
-  const twoDaysFromNow = new Date();
-  twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
-  const exampleDate = `${String(twoDaysFromNow.getMonth() + 1).padStart(2, '0')}${String(twoDaysFromNow.getDate()).padStart(2, '0')}`;
-  
+  const exampleDate = getExampleDate();
+
   // Get airport count for OurAirports credit
   const airportCount = airportTimezoneService.getAirportCount();
   
