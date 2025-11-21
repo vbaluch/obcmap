@@ -212,6 +212,7 @@ export class OneWayAvailabilityBot {
     }
 
     if (trimmedText === '/list') {
+      commandsTotal.inc({ command: 'list', status: 'success' });
       await this.replyWithUserEntries(context);
       return;
     }

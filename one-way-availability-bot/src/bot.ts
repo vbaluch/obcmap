@@ -4,7 +4,7 @@ import { airportTimezoneService } from "./airport-timezone";
 import { getExampleDate } from "./utils/date-helpers";
 import { BotContext } from "./types";
 import { createLogger } from "./logger";
-import { errorsTotal } from "./metrics";
+import { errorsTotal, commandsTotal } from "./metrics";
 
 const logger = createLogger('bot');
 
@@ -59,6 +59,7 @@ export function createBotHandlers(groupId?: number, topicId?: number): BotHandle
   const oneWayAvailabilityBot = new OneWayAvailabilityBot(undefined, groupId, topicId);
 
   const sendHelpMessage = async (context: BotContext) => {
+    commandsTotal.inc({ command: 'help', status: 'success' });
     // Send regular help message
     await context.send(getHelpText(), { parse_mode: 'MarkdownV2' });
 
