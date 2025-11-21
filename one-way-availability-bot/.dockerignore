@@ -1,0 +1,9 @@
+.env
+*.db
+*.db-*
+coverage/
+dist/
+node_modules/
+src/__tests__/
+.git
+README.md

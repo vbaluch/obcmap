@@ -1,0 +1,85 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker-compose-plugin
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    owner: root:root
+    content: |
+      {
+        "ipv6": true,
+        "fixed-cidr-v6": "2a01:4f9:c013:4e8d::/80"
+      }
+
+  - path: /opt/bot/.env
+    permissions: '0600'
+    owner: root:root
+    content: |
+      BOT_TOKEN=REPLACE_ME_AFTER_DEPLOYMENT
+      GROUP_ID=-1003326175204
+      TOPIC_ID=2
+      LOG_LEVEL=info
+      METRICS_PORT=3000
+
+  - path: /opt/bot/docker-compose.yml
+    permissions: '0644'
+    owner: root:root
+    content: |
+      services:
+        one-way-availability-bot:
+          image: one-way-availability-bot:latest
+          container_name: one-way-availability-bot
+          restart: always
+
+          env_file:
+            - .env
+
+          volumes:
+            - ./data:/app/data
+
+          ports:
+            - "${METRICS_PORT:-3000}:3000"
+
+          healthcheck:
+            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+            interval: 60s
+            timeout: 10s
+            retries: 3
+            start_period: 15s
+
+          deploy:
+            resources:
+              limits:
+                cpus: '0.5'
+                memory: 512M
+              reservations:
+                cpus: '0.25'
+                memory: 256M
+
+          stop_grace_period: 30s
+
+          logging:
+            driver: "json-file"
+            options:
+              max-size: "10m"
+              max-file: "5"
+
+      networks:
+        default:
+          enable_ipv6: true
+          ipam:
+            config:
+              - subnet: 2a01:4f9:c013:4e8d:1::/80
+
+runcmd:
+  - systemctl restart docker
+  - mkdir -p /opt/bot/data
+  - chown 1000:1000 /opt/bot/data
+  # --force is required for non-interactive execution
+  - ufw allow 22/tcp
+  - ufw --force enable

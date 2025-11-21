@@ -1,4 +1,0 @@
-onlyBuiltDependencies:
-  - esbuild
-  - unrs-resolver
-  - better-sqlite3
