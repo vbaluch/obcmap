@@ -1,5 +1,6 @@
 import { AvailabilityEntry } from './parser';
 import { DatabaseWrapper } from './database';
+import { entriesActive } from './metrics';
 
 export class AvailabilityStorage {
   private db: DatabaseWrapper;
@@ -12,8 +13,13 @@ export class AvailabilityStorage {
     return this.db;
   }
 
+  private updateEntriesActiveGauge(): void {
+    const count = this.db.getAllEntries().length;
+    entriesActive.set(count);
+  }
+
   addEntry(entry: AvailabilityEntry): { success: boolean; error?: string } {
-    return this.db.addEntry(
+    const result = this.db.addEntry(
       entry.userId,
       entry.username,
       entry.date,
@@ -22,14 +28,26 @@ export class AvailabilityStorage {
       entry.originalText,
       entry.expiryTimestamp
     );
+    if (result.success) {
+      this.updateEntriesActiveGauge();
+    }
+    return result;
   }
 
   removeEntry(userId: number, date: string, departure: string, arrival: string): boolean {
-    return this.db.removeEntry(userId, date, departure, arrival);
+    const removed = this.db.removeEntry(userId, date, departure, arrival);
+    if (removed) {
+      this.updateEntriesActiveGauge();
+    }
+    return removed;
   }
 
   clearUserEntries(userId: number): number {
-    return this.db.clearUserEntries(userId);
+    const count = this.db.clearUserEntries(userId);
+    if (count > 0) {
+      this.updateEntriesActiveGauge();
+    }
+    return count;
   }
 
   /**
@@ -50,6 +68,10 @@ export class AvailabilityStorage {
           removedCount++;
         }
       }
+    }
+
+    if (removedCount > 0) {
+      this.updateEntriesActiveGauge();
     }
 
     return removedCount;

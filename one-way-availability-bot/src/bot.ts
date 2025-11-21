@@ -3,6 +3,10 @@ import { AvailabilityBot, BotAPI } from "./availability-bot";
 import { airportTimezoneService } from "./airport-timezone";
 import { getExampleDate } from "./utils/date-helpers";
 import { BotContext } from "./types";
+import { createLogger } from "./logger";
+import { errorsTotal } from "./metrics";
+
+const logger = createLogger('bot');
 
 export interface BotHandlers {
   onStart: (context: BotContext) => Promise<void>;
@@ -80,7 +84,12 @@ export function createBotHandlers(groupId?: number, topicId?: number): BotHandle
   };
 }
 
-export function setupBot(token: string, groupId?: number, topicId?: number): Bot {
+export interface BotSetup {
+  bot: Bot;
+  availabilityBot: AvailabilityBot;
+}
+
+export function setupBot(token: string, groupId?: number, topicId?: number): BotSetup {
   const bot = new Bot(token);
   const handlers = createBotHandlers(groupId, topicId);
 
@@ -91,15 +100,46 @@ export function setupBot(token: string, groupId?: number, topicId?: number): Bot
   bot.command("rm", handlers.onRemove);
   bot.on("message", handlers.onMessage);
 
-  // Set the bot API and start the expiry scheduler
-  if (handlers.getBot) {
-    const availabilityBot = handlers.getBot();
-    // Cast bot.api to BotAPI since it has all the required methods
-    // but with more complex generic types
-    availabilityBot.setBotApi(bot.api as unknown as BotAPI);
-    availabilityBot.startExpiryScheduler();
-    console.log('Expiry scheduler started with automatic message updates');
-  }
+  // GramIO error handlers
+  bot.onError(({ context, kind, error }) => {
+    errorsTotal.inc({ type: 'bot_handler_error' });
 
-  return bot;
+    const logContext: Record<string, unknown> = {
+      error,
+      errorKind: kind
+    };
+
+    // Safely add optional context properties
+    if (context.update) {
+      logContext.update = context.update;
+    }
+    if ('from' in context && context.from && typeof context.from === 'object' && 'id' in context.from) {
+      logContext.userId = (context.from as { id: number }).id;
+    }
+    if ('chat' in context && context.chat && typeof context.chat === 'object' && 'id' in context.chat) {
+      logContext.chatId = (context.chat as { id: number }).id;
+    }
+
+    logger.error(logContext, 'Bot handler error');
+  });
+
+  bot.onResponseError((errorContext) => {
+    errorsTotal.inc({ type: 'bot_api_error' });
+    logger.error({
+      error: errorContext, // Log the full error object with stack trace
+      method: errorContext.method,
+      code: errorContext.code,
+      params: errorContext.params,
+      payload: errorContext.payload
+    }, 'Telegram API error');
+  });
+
+  const availabilityBot = handlers.getBot!();
+  // Cast bot.api to BotAPI since it has all the required methods
+  // but with more complex generic types
+  availabilityBot.setBotApi(bot.api as unknown as BotAPI);
+  availabilityBot.startExpiryScheduler();
+  logger.info('Expiry scheduler started with automatic message updates');
+
+  return { bot, availabilityBot };
 }

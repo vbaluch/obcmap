@@ -1,3 +1,15 @@
+// Mock logger before imports
+const mockLoggerFns = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+};
+
+jest.mock('../logger', () => ({
+  createLogger: jest.fn(() => mockLoggerFns),
+}));
+
 import { ExpiryScheduler } from '../expiry-scheduler';
 import { AvailabilityStorage } from '../storage';
 import { airportTimezoneService } from '../airport-timezone';
@@ -10,6 +22,7 @@ describe('ExpiryScheduler', () => {
   beforeEach(() => {
     storage = new AvailabilityStorage(':memory:');
     scheduler = new ExpiryScheduler(storage, airportTimezoneService, 0.01); // 0.01 minutes = 600ms for testing
+    jest.clearAllMocks();
   });
 
   afterEach(() => {
@@ -32,18 +45,17 @@ describe('ExpiryScheduler', () => {
 
   it('should not start twice', () => {
     scheduler.start();
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
-    
+    jest.clearAllMocks(); // Clear the info log from first start
+
     scheduler.start(); // Try to start again
-    expect(consoleSpy).toHaveBeenCalledWith('ExpiryScheduler is already running');
-    
-    consoleSpy.mockRestore();
+    expect(mockLoggerFns.warn).toHaveBeenCalledWith('ExpiryScheduler is already running');
+
     scheduler.stop();
   });
 
   it('should run cleanup manually', () => {
     const users = createMockUsers();
-    
+
     // Add some test entries
     storage.addEntry({
       userId: users.alice.id,
@@ -57,29 +69,24 @@ describe('ExpiryScheduler', () => {
 
     expect(storage.getAllEntries()).toHaveLength(1);
 
-    // Mock console.log to capture output
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-    
     scheduler.runCleanup();
-    
-    // Should have logged cleanup activity
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Expiry cleanup:'));
-    
-    consoleSpy.mockRestore();
+
+    // Should have logged cleanup activity (no expired entries in this case)
+    expect(mockLoggerFns.debug).toHaveBeenCalledWith('Expiry cleanup: no expired entries found');
   });
 
   it('should handle errors during cleanup gracefully', () => {
     // Mock storage to throw an error
-    const errorSpy = jest.spyOn(console, 'error').mockImplementation();
     jest.spyOn(storage, 'cleanupExpiredEntries').mockImplementation(() => {
       throw new Error('Database error');
     });
 
     scheduler.runCleanup();
 
-    expect(errorSpy).toHaveBeenCalledWith('Error during expiry cleanup:', expect.any(Error));
-    
-    errorSpy.mockRestore();
+    expect(mockLoggerFns.error).toHaveBeenCalledWith(
+      { error: expect.any(Error) },
+      'Error during expiry cleanup'
+    );
   });
 
   it('should run cleanup periodically when started', (done) => {

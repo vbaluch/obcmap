@@ -4,6 +4,8 @@ import { ExpiryScheduler } from './expiry-scheduler';
 import { airportTimezoneService } from './airport-timezone';
 import { getExampleDate } from './utils/date-helpers';
 import { BotContext } from './types';
+import { createLogger } from './logger';
+import { commandsTotal, commandDuration, apiCallsTotal, errorsTotal, cacheTotal } from './metrics';
 
 interface MembershipCacheEntry {
   isAllowed: boolean;
@@ -26,6 +28,8 @@ export interface BotAPI {
     user_id: number;
   }) => Promise<{ status: string }>;
 }
+
+const logger = createLogger('availability-bot');
 
 export class AvailabilityBot {
   private storage: AvailabilityStorage;
@@ -67,19 +71,23 @@ export class AvailabilityBot {
     if (cached) {
       const cacheValidDuration = cached.isAllowed ? 60 * 60 * 1000 : 5 * 60 * 1000; // 60min positive, 5min negative
       if (now - cached.timestamp < cacheValidDuration) {
+        cacheTotal.inc({ result: 'hit' });
         return cached.isAllowed;
       }
       // Cache expired, remove entry
       this.membershipCache.delete(userId);
+      cacheTotal.inc({ result: 'expired' });
     }
 
     // Check membership via API
+    cacheTotal.inc({ result: 'miss' });
     try {
       const api = context.bot.api;
       const chatMember = await api.getChatMember({
         chat_id: this.targetGroupId,
         user_id: userId
       });
+      apiCallsTotal.inc({ method: 'getChatMember', status: 'success' });
 
       // Allow: member, administrator, owner
       // Block: kicked, left, restricted
@@ -92,8 +100,13 @@ export class AvailabilityBot {
         timestamp: now
       });
 
+      logger.debug({ userId, isAllowed, status: chatMember.status }, 'Membership check completed');
       return isAllowed;
     } catch (error) {
+      apiCallsTotal.inc({ method: 'getChatMember', status: 'error' });
+      errorsTotal.inc({ type: 'api_getChatMember' });
+      logger.error({ error, userId }, 'Failed to check group membership');
+
       // Fail closed - if we can't verify membership, deny access
       this.membershipCache.set(userId, {
         isAllowed: false,
@@ -110,11 +123,17 @@ export class AvailabilityBot {
         chat_id: this.targetGroupId,
         user_id: userId
       });
+      apiCallsTotal.inc({ method: 'getChatMember', status: 'success' });
 
       // Only administrators and creators are admins
       const adminStatuses = ['administrator', 'creator'];
-      return adminStatuses.includes(chatMember.status);
+      const isAdmin = adminStatuses.includes(chatMember.status);
+      logger.debug({ userId, isAdmin, status: chatMember.status }, 'Admin check completed');
+      return isAdmin;
     } catch (error) {
+      apiCallsTotal.inc({ method: 'getChatMember', status: 'error' });
+      errorsTotal.inc({ type: 'api_getChatMember' });
+      logger.error({ error, userId }, 'Failed to check admin status');
       // Fail closed - if we can't verify admin status, deny access
       return false;
     }
@@ -256,121 +275,164 @@ More admin commands will be added\\.`;
   }
 
   async handleAddCommand(context: BotContext, commandText: string): Promise<void> {
+    const end = commandDuration.startTimer({ command: 'add' });
     const userId = context.from.id;
     const username = context.from.username;
 
-    // Username is required for adding entries
-    if (!username) {
-      await this.sendToUser(context, 'Sorry, you need a Telegram username (@username) to use this bot.');
-      return;
-    }
-
-    // Extract entry text after "/add "
-    const entryText = commandText.substring(5).trim();
-    if (!entryText) {
-      const exampleDate = getExampleDate();
-      await this.sendToUser(context, `Usage: /add ${exampleDate} BER IST`);
-      return;
-    }
-
-    const parseResult = parseAvailabilityEntry(entryText, userId, username, commandText);
-    if (!parseResult.success) {
-      await this.sendToUser(context, this.formatParseError(entryText, parseResult, commandText));
-      return;
-    }
-    
-    const entry = parseResult.entry!;
-
-    const result = this.storage.addEntry(entry);
-    if (result.success) {
-      await this.replyWithUserEntries(context);
-      await this.postUpdatedListToGroup(context);
-    } else {
-      // Show user's current entries for certain error types
-      if (result.error && (result.error.includes('Entry already exists:') || result.error.includes('Maximum 3 entries'))) {
-        await this.sendErrorWithUserEntries(context, result.error);
-      } else {
-        await this.sendToUser(context, result.error || 'Unknown error');
+    try {
+      // Username is required for adding entries
+      if (!username) {
+        commandsTotal.inc({ command: 'add', status: 'error' });
+        await this.sendToUser(context, 'Sorry, you need a Telegram username (@username) to use this bot.');
+        return;
       }
+
+      // Extract entry text after "/add "
+      const entryText = commandText.substring(5).trim();
+      if (!entryText) {
+        commandsTotal.inc({ command: 'add', status: 'error' });
+        const exampleDate = getExampleDate();
+        await this.sendToUser(context, `Usage: /add ${exampleDate} BER IST`);
+        return;
+      }
+
+      const parseResult = parseAvailabilityEntry(entryText, userId, username, commandText);
+      if (!parseResult.success) {
+        commandsTotal.inc({ command: 'add', status: 'error' });
+        logger.info({ userId, username, entryText, error: parseResult.error }, 'Add command parse error');
+        await this.sendToUser(context, this.formatParseError(entryText, parseResult, commandText));
+        return;
+      }
+
+      const entry = parseResult.entry!;
+
+      const result = this.storage.addEntry(entry);
+      if (result.success) {
+        commandsTotal.inc({ command: 'add', status: 'success' });
+        logger.info({ userId, username, entry: { date: entry.date, departure: entry.departure, arrival: entry.arrival } }, 'Entry added successfully');
+        await this.replyWithUserEntries(context);
+        await this.postUpdatedListToGroup(context);
+      } else {
+        commandsTotal.inc({ command: 'add', status: 'error' });
+        logger.warn({ userId, username, error: result.error }, 'Add command failed');
+        // Show user's current entries for certain error types
+        if (result.error && (result.error.includes('Entry already exists:') || result.error.includes('Maximum 3 entries'))) {
+          await this.sendErrorWithUserEntries(context, result.error);
+        } else {
+          await this.sendToUser(context, result.error || 'Unknown error');
+        }
+      }
+    } finally {
+      end();
     }
   }
 
   async handleClearCommand(context: BotContext): Promise<void> {
+    const end = commandDuration.startTimer({ command: 'clear' });
     const userId = context.from.id;
+    const username = context.from.username;
 
-    // Get the user's entries before clearing them
-    const entriesToClear = this.storage.getUserEntries(userId);
+    try {
+      // Get the user's entries before clearing them
+      const entriesToClear = this.storage.getUserEntries(userId);
 
-    if (entriesToClear.length > 0) {
-      // Clear the entries
-      this.storage.clearUserEntries(userId);
+      if (entriesToClear.length > 0) {
+        // Clear the entries
+        this.storage.clearUserEntries(userId);
+        commandsTotal.inc({ command: 'clear', status: 'success' });
+        logger.info({ userId, username, count: entriesToClear.length }, 'Entries cleared successfully');
 
-      // Show what was cleared
-      const clearedEntries = entriesToClear
-        .sort((a, b) => {
-          if (a.date !== b.date) {
-            return this.storage.compareDates(a.date, b.date);
-          }
-          return a.departure.localeCompare(b.departure);
-        })
-        .map(entry => `${this.convertFullDateToMMDD(entry.date)} ${entry.departure} / ${entry.arrival}`)
-        .join('\n');
+        // Show what was cleared
+        const clearedEntries = entriesToClear
+          .sort((a, b) => {
+            if (a.date !== b.date) {
+              return this.storage.compareDates(a.date, b.date);
+            }
+            return a.departure.localeCompare(b.departure);
+          })
+          .map(entry => `${this.convertFullDateToMMDD(entry.date)} ${entry.departure} / ${entry.arrival}`)
+          .join('\n');
 
-      await this.sendToUser(context, `Cleared entries:\n${clearedEntries}\n\nYour entries: none`);
-      await this.postUpdatedListToGroup(context);
-    } else {
-      await this.sendToUser(context, 'No entries to clear.');
+        await this.sendToUser(context, `Cleared entries:\n${clearedEntries}\n\nYour entries: none`);
+        await this.postUpdatedListToGroup(context);
+      } else {
+        commandsTotal.inc({ command: 'clear', status: 'success' });
+        logger.info({ userId, username }, 'Clear command - no entries to clear');
+        await this.sendToUser(context, 'No entries to clear.');
+      }
+    } finally {
+      end();
     }
   }
 
   async handleImportCommand(context: BotContext, commandText: string): Promise<void> {
+    const end = commandDuration.startTimer({ command: 'import' });
     const userId = context.from.id;
+    const username = context.from.username;
 
-    // Check if user is admin
-    const isAdmin = await this.isGroupAdmin(context, userId);
-    if (!isAdmin) {
-      await this.sendToUser(context, 'This command is only available to group administrators.');
-      return;
-    }
+    try {
+      // Check if user is admin
+      const isAdmin = await this.isGroupAdmin(context, userId);
+      if (!isAdmin) {
+        commandsTotal.inc({ command: 'import', status: 'error' });
+        logger.warn({ userId, username }, 'Import command denied - not admin');
+        await this.sendToUser(context, 'This command is only available to group administrators.');
+        return;
+      }
 
-    // Extract lines after "/import"
-    const importText = commandText.substring(7).trim();
-    if (!importText) {
-      await this.sendToUser(context, 'Usage: /import\n1122 HOT / DOG @Alice\n1123 HEL / YES @Bob');
-      return;
-    }
+      // Extract lines after "/import"
+      const importText = commandText.substring(7).trim();
+      if (!importText) {
+        commandsTotal.inc({ command: 'import', status: 'error' });
+        await this.sendToUser(context, 'Usage: /import\n1122 HOT / DOG @Alice\n1123 HEL / YES @Bob');
+        return;
+      }
 
-    const lines = importText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    const results: { success: boolean; line: string; error?: string }[] = [];
+      const lines = importText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      const results: { success: boolean; line: string; error?: string }[] = [];
 
-    for (const line of lines) {
-      const parsed = this.parseImportLine(line);
-      if (parsed.success && parsed.entry) {
-        const addResult = this.storage.addEntry(parsed.entry);
-        if (addResult.success) {
-          results.push({ success: true, line });
+      for (const line of lines) {
+        const parsed = this.parseImportLine(line);
+        if (parsed.success && parsed.entry) {
+          const addResult = this.storage.addEntry(parsed.entry);
+          if (addResult.success) {
+            results.push({ success: true, line });
+          } else {
+            results.push({ success: false, line, error: addResult.error || 'Unknown error' });
+          }
         } else {
-          results.push({ success: false, line, error: addResult.error || 'Unknown error' });
+          results.push({ success: false, line, error: parsed.error || 'Invalid format' });
         }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      const failedResults = results.filter(r => !r.success);
+
+      if (successCount > 0) {
+        commandsTotal.inc({ command: 'import', status: 'success' });
       } else {
-        results.push({ success: false, line, error: parsed.error || 'Invalid format' });
+        commandsTotal.inc({ command: 'import', status: 'error' });
       }
-    }
 
-    const successCount = results.filter(r => r.success).length;
-    const failedResults = results.filter(r => !r.success);
+      logger.info(
+        { userId, username, totalLines: lines.length, successCount, failedCount: failedResults.length },
+        'Import command completed'
+      );
 
-    let response = `Imported ${successCount} entries.`;
-    if (failedResults.length > 0) {
-      response += `\n\nFailed to import ${failedResults.length} entries:`;
-      for (const failed of failedResults) {
-        response += `\n- ${failed.line} (${failed.error})`;
+      let response = `Imported ${successCount} entries.`;
+      if (failedResults.length > 0) {
+        response += `\n\nFailed to import ${failedResults.length} entries:`;
+        for (const failed of failedResults) {
+          response += `\n- ${failed.line} (${failed.error})`;
+        }
       }
-    }
 
-    await this.sendToUser(context, response);
-    if (successCount > 0) {
-      await this.postUpdatedListToGroup(context);
+      await this.sendToUser(context, response);
+      if (successCount > 0) {
+        await this.postUpdatedListToGroup(context);
+      }
+    } finally {
+      end();
     }
   }
 
@@ -562,26 +624,39 @@ More admin commands will be added\\.`;
   }
 
   async handleRemoveCommand(context: BotContext, text: string): Promise<void> {
+    const end = commandDuration.startTimer({ command: 'remove' });
     const userId = context.from.id;
-    const result = await this.processRemoveCommand(text, userId);
+    const username = context.from.username;
 
-    if (result.success) {
-      // First reply to user with their current entries
-      await this.replyWithUserEntries(context);
+    try {
+      const result = await this.processRemoveCommand(text, userId);
 
-      // Then post updated full list to group (last message)
-      await this.postUpdatedListToGroup(context);
-    } else {
-      // Add quotes around the original command for clarity
-      const originalText = text.trim();
-      const errorMessage = `"${originalText}": ${result.error || 'Unknown error'}`;
-      
-      // For "Multiple entries found" errors, show user entries like other errors
-      if (result.error && result.error.includes('Multiple entries found')) {
-        await this.sendErrorWithUserEntries(context, errorMessage);
+      if (result.success) {
+        commandsTotal.inc({ command: 'remove', status: 'success' });
+        logger.info({ userId, username, command: text }, 'Entry removed successfully');
+
+        // First reply to user with their current entries
+        await this.replyWithUserEntries(context);
+
+        // Then post updated full list to group (last message)
+        await this.postUpdatedListToGroup(context);
       } else {
-        await this.sendToUser(context, errorMessage);
+        commandsTotal.inc({ command: 'remove', status: 'error' });
+        logger.warn({ userId, username, command: text, error: result.error }, 'Remove command failed');
+
+        // Add quotes around the original command for clarity
+        const originalText = text.trim();
+        const errorMessage = `"${originalText}": ${result.error || 'Unknown error'}`;
+
+        // For "Multiple entries found" errors, show user entries like other errors
+        if (result.error && result.error.includes('Multiple entries found')) {
+          await this.sendErrorWithUserEntries(context, errorMessage);
+        } else {
+          await this.sendToUser(context, errorMessage);
+        }
       }
+    } finally {
+      end();
     }
   }
 
@@ -715,7 +790,7 @@ More admin commands will be added\\.`;
    */
   async postUpdatedListWithoutContext(): Promise<void> {
     if (!this.botApi) {
-      console.warn('Bot API not set, cannot post updated list');
+      logger.warn('Bot API not set, cannot post updated list');
       return;
     }
 
@@ -729,7 +804,10 @@ More admin commands will be added\\.`;
           chat_id: this.targetGroupId,
           message_id: lastMessage.messageId
         });
+        apiCallsTotal.inc({ method: 'deleteMessage', status: 'success' });
       } catch (error) {
+        apiCallsTotal.inc({ method: 'deleteMessage', status: 'error' });
+        logger.debug({ error, messageId: lastMessage.messageId }, 'Failed to delete old message (might be too old)');
         // Ignore errors (message might be too old to delete)
       }
     }
@@ -740,16 +818,24 @@ More admin commands will be added\\.`;
     const escapedListMessage = this.escapeMarkdownV2(listMessage);
     const finalMessage = `*OBC One\\-Way Availability*\n\n${escapedListMessage}`;
 
-    const sentMessage = await api.sendMessage({
-      chat_id: this.targetGroupId,
-      text: finalMessage,
-      message_thread_id: this.requiredTopicId,
-      parse_mode: 'MarkdownV2'
-    });
+    try {
+      const sentMessage = await api.sendMessage({
+        chat_id: this.targetGroupId,
+        text: finalMessage,
+        message_thread_id: this.requiredTopicId,
+        parse_mode: 'MarkdownV2'
+      });
+      apiCallsTotal.inc({ method: 'sendMessage', status: 'success' });
 
-    // Store the new message ID for future deletion
-    if (sentMessage?.message_id) {
-      this.storage.setLastMessage(sentMessage.message_id, this.targetGroupId);
+      // Store the new message ID for future deletion
+      if (sentMessage?.message_id) {
+        this.storage.setLastMessage(sentMessage.message_id, this.targetGroupId);
+      }
+    } catch (error) {
+      apiCallsTotal.inc({ method: 'sendMessage', status: 'error' });
+      errorsTotal.inc({ type: 'api_sendMessage' });
+      logger.error({ error }, 'Failed to send message to group');
+      throw error;
     }
   }
 }

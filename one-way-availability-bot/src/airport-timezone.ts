@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from './logger';
 const { find } = require('geo-tz/dist/find-now');
+
+const logger = createLogger('airport-timezone');
 
 interface Airport {
   iataCode: string;
@@ -18,32 +21,32 @@ export class AirportTimezoneService {
 
   private loadAirports(): void {
     const airportsPath = path.join(__dirname, '../..', 'ourairports-data', 'airports.csv');
-    
+
     if (!fs.existsSync(airportsPath)) {
-      console.warn('Airports data file not found, timezone detection will fallback to UTC-12');
+      logger.warn({ airportsPath }, 'Airports data file not found, timezone detection will fallback to UTC-12');
       return;
     }
 
     try {
       const csvContent = fs.readFileSync(airportsPath, 'utf-8');
       const lines = csvContent.split('\n');
-      
+
       // Skip header row
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
         if (!line) continue;
         const trimmedLine = line.trim();
         if (!trimmedLine) continue;
-        
+
         const airport = this.parseAirportLine(trimmedLine);
         if (airport && airport.iataCode) {
           this.airports.set(airport.iataCode, airport);
         }
       }
-      
-      console.log(`Loaded ${this.airports.size} airports with IATA codes`);
+
+      logger.info({ count: this.airports.size }, 'Loaded airports with IATA codes');
     } catch (error) {
-      console.warn('Failed to load airports data:', error);
+      logger.warn({ error }, 'Failed to load airports data');
     }
   }
 
@@ -126,7 +129,7 @@ export class AirportTimezoneService {
         return timezones[0];
       }
     } catch (error) {
-      console.warn(`Failed to get timezone for ${airportCode}:`, error);
+      logger.warn({ error, airportCode }, 'Failed to get timezone for airport');
     }
     
     // Fallback to UTC-12

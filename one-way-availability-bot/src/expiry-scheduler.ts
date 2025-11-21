@@ -1,5 +1,9 @@
 import { AvailabilityStorage } from './storage';
 import { AirportTimezoneService } from './airport-timezone';
+import { createLogger } from './logger';
+import { entriesExpiredTotal, errorsTotal } from './metrics';
+
+const logger = createLogger('expiry-scheduler');
 
 export class ExpiryScheduler {
   private intervalId: NodeJS.Timeout | null = null;
@@ -23,15 +27,15 @@ export class ExpiryScheduler {
    */
   start(): void {
     if (this.intervalId) {
-      console.warn('ExpiryScheduler is already running');
+      logger.warn('ExpiryScheduler is already running');
       return;
     }
 
-    console.log(`Starting expiry scheduler - cleanup every ${this.intervalMs / 60000} minutes`);
-    
+    logger.info({ intervalMinutes: this.intervalMs / 60000 }, 'Starting expiry scheduler');
+
     // Run cleanup immediately, then on interval
     this.runCleanup();
-    
+
     this.intervalId = setInterval(() => {
       this.runCleanup();
     }, this.intervalMs);
@@ -44,7 +48,7 @@ export class ExpiryScheduler {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log('ExpiryScheduler stopped');
+      logger.info('ExpiryScheduler stopped');
     }
   }
 
@@ -56,19 +60,22 @@ export class ExpiryScheduler {
       const removedCount = this.storage.cleanupExpiredEntries();
 
       if (removedCount > 0) {
-        console.log(`Expiry cleanup: removed ${removedCount} expired entry/entries`);
+        entriesExpiredTotal.inc(removedCount);
+        logger.info({ removedCount }, 'Expiry cleanup: removed expired entries');
 
         // Call the callback to notify that entries were expired
         if (this.onEntriesExpired) {
           Promise.resolve(this.onEntriesExpired()).catch((error) => {
-            console.error('Error in onEntriesExpired callback:', error);
+            errorsTotal.inc({ type: 'expiry_callback_error' });
+            logger.error({ error }, 'Error in onEntriesExpired callback');
           });
         }
       } else {
-        console.log(`Expiry cleanup: no expired entries found`);
+        logger.debug('Expiry cleanup: no expired entries found');
       }
     } catch (error) {
-      console.error('Error during expiry cleanup:', error);
+      errorsTotal.inc({ type: 'expiry_cleanup_error' });
+      logger.error({ error }, 'Error during expiry cleanup');
     }
   }
 
