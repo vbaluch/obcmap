@@ -1,5 +1,5 @@
 import { Bot } from "gramio";
-import { AvailabilityBot, BotAPI } from "./availability-bot";
+import { OneWayAvailabilityBot, BotAPI } from "./one-way-availability-bot";
 import { airportTimezoneService } from "./airport-timezone";
 import { getExampleDate } from "./utils/date-helpers";
 import { BotContext } from "./types";
@@ -15,7 +15,7 @@ export interface BotHandlers {
   onRemove: (context: BotContext) => Promise<void>;
   onMessage: (context: BotContext) => Promise<void>;
   // For testing
-  getBot?: () => AvailabilityBot;
+  getBot?: () => OneWayAvailabilityBot;
 }
 
 function getHelpText(): string {
@@ -56,14 +56,14 @@ function getHelpText(): string {
 }
 
 export function createBotHandlers(groupId?: number, topicId?: number): BotHandlers {
-  const availabilityBot = new AvailabilityBot(undefined, groupId, topicId);
+  const oneWayAvailabilityBot = new OneWayAvailabilityBot(undefined, groupId, topicId);
 
   const sendHelpMessage = async (context: BotContext) => {
     // Send regular help message
     await context.send(getHelpText(), { parse_mode: 'MarkdownV2' });
 
     // Check if user is admin and send admin help
-    await availabilityBot.sendAdminHelpIfAdmin(context);
+    await oneWayAvailabilityBot.sendAdminHelpIfAdmin(context);
   };
 
   return {
@@ -71,22 +71,22 @@ export function createBotHandlers(groupId?: number, topicId?: number): BotHandle
     onHelp: sendHelpMessage,
     onAdd: async (context) => {
       // Route to main handleMessage to ensure proper multi-line detection
-      await availabilityBot.handleMessage(context);
+      await oneWayAvailabilityBot.handleMessage(context);
     },
     onRemove: async (context) => {
       // Route to main handleMessage to ensure proper multi-line detection
-      await availabilityBot.handleMessage(context);
+      await oneWayAvailabilityBot.handleMessage(context);
     },
     onMessage: async (context) => {
-      await availabilityBot.handleMessage(context);
+      await oneWayAvailabilityBot.handleMessage(context);
     },
-    getBot: () => availabilityBot,
+    getBot: () => oneWayAvailabilityBot,
   };
 }
 
 export interface BotSetup {
   bot: Bot;
-  availabilityBot: AvailabilityBot;
+  oneWayAvailabilityBot: OneWayAvailabilityBot;
 }
 
 export function setupBot(token: string, groupId?: number, topicId?: number): BotSetup {
@@ -134,12 +134,12 @@ export function setupBot(token: string, groupId?: number, topicId?: number): Bot
     }, 'Telegram API error');
   });
 
-  const availabilityBot = handlers.getBot!();
+  const oneWayAvailabilityBot = handlers.getBot!();
   // Cast bot.api to BotAPI since it has all the required methods
   // but with more complex generic types
-  availabilityBot.setBotApi(bot.api as unknown as BotAPI);
-  availabilityBot.startExpiryScheduler();
+  oneWayAvailabilityBot.setBotApi(bot.api as unknown as BotAPI);
+  oneWayAvailabilityBot.startExpiryScheduler();
   logger.info('Expiry scheduler started with automatic message updates');
 
-  return { bot, availabilityBot };
+  return { bot, oneWayAvailabilityBot };
 }

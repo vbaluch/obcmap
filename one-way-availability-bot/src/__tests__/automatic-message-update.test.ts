@@ -1,14 +1,14 @@
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { ExpiryScheduler } from '../expiry-scheduler';
 import { airportTimezoneService } from '../airport-timezone';
 import { createMockContext, createMockUsers } from '../utils/test-helpers';
 
 describe('Automatic Message Update on Expiry', () => {
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
     jest.useFakeTimers();
-    bot = new AvailabilityBot(':memory:', -123, 123);
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123);
     bot.getStorage().clearAllData();
   });
 

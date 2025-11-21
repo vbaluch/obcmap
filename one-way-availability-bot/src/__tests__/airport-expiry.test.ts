@@ -1,12 +1,12 @@
 import { airportTimezoneService } from '../airport-timezone';
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { createMockContext, createMockUsers } from '../utils/test-helpers';
 
 describe('Airport Expiry Functionality', () => {
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
-    bot = new AvailabilityBot(':memory:', -123, 123);
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123);
     bot.getStorage().clearAllData();
   });
 

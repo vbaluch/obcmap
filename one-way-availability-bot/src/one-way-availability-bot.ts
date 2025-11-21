@@ -31,7 +31,7 @@ export interface BotAPI {
 
 const logger = createLogger('availability-bot');
 
-export class AvailabilityBot {
+export class OneWayAvailabilityBot {
   private storage: AvailabilityStorage;
   private requiredTopicId: number;
   private targetGroupId: number;

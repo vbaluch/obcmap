@@ -1,8 +1,8 @@
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { createMockContext, createMockUsers, createMockGroupChat } from '../utils/test-helpers';
 
 describe('List Command', () => {
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -10,7 +10,7 @@ describe('List Command', () => {
 
     // Ensure group messages are enabled by default for tests
     delete process.env.ACCEPT_GROUP_MESSAGES;
-    bot = new AvailabilityBot(':memory:', -123, 123);
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123);
     bot.getStorage().clearAllData();
   });
 

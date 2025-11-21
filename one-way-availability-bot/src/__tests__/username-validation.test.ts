@@ -1,14 +1,14 @@
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { createMockContext, createMockPrivateChat } from '../utils/test-helpers';
 
 describe('Username Validation', () => {
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2025-11-13T10:00:00.000Z'));
 
-    bot = new AvailabilityBot(':memory:', -123, 123);
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123);
     bot.getStorage().clearAllData();
   });
 

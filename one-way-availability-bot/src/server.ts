@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import { register } from './metrics';
 import { createLogger } from './logger';
 import type { DatabaseWrapper } from './database';
-import type { BotAPI } from './availability-bot';
+import type { BotAPI } from './one-way-availability-bot';
 
 const logger = createLogger('server');
 

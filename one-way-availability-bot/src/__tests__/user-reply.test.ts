@@ -1,8 +1,8 @@
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { createMockContext, createMockUsers } from '../utils/test-helpers';
 
 describe('User Reply and Channel Posting', () => {
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -10,7 +10,7 @@ describe('User Reply and Channel Posting', () => {
 
     // Set ACCEPT_GROUP_MESSAGES to false to match private-only functionality
     process.env.ACCEPT_GROUP_MESSAGES = 'false';
-    bot = new AvailabilityBot(':memory:', -123, 123); // Test topic ID
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123); // Test topic ID
     bot.getStorage().clearAllData();
   });
 

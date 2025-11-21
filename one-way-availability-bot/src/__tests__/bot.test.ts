@@ -1,11 +1,11 @@
 import { createBotHandlers } from '../bot';
-import { AvailabilityBot } from '../availability-bot';
+import { OneWayAvailabilityBot } from '../one-way-availability-bot';
 import { createMockContext, createMockUsers } from '../utils/test-helpers';
 import { BotContext } from '../types';
 
 describe('Bot Handlers', () => {
   let handlers: ReturnType<typeof createBotHandlers>;
-  let bot: AvailabilityBot;
+  let bot: OneWayAvailabilityBot;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -13,7 +13,7 @@ describe('Bot Handlers', () => {
 
     // Ensure group messages are enabled by default for tests
     delete process.env.ACCEPT_GROUP_MESSAGES;
-    bot = new AvailabilityBot(':memory:', -123, 123);
+    bot = new OneWayAvailabilityBot(':memory:', -123, 123);
     bot.getStorage().clearAllData();
     
     // Create handlers that use our test bot instance
